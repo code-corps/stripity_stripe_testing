@@ -23,7 +23,8 @@ defmodule FakeStripe.Mixfile do
     [
       {:ranch, "~> 1.2"},
       {:cowboy, "~> 1.0"},
-      {:plug, "~> 1.2 or ~> 1.3"}
+      {:plug, "~> 1.2 or ~> 1.3"},
+      {:hackney, "~> 1.6", only: [:test]}
     ]
   end
 end

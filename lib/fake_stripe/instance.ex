@@ -22,6 +22,11 @@ defmodule FakeStripe.Instance do
   # address.
   @listen_ip {127, 0, 0, 1}
 
+  # This is the number of Cowboy "acceptors" to run for every instance;
+  # acceptors are what actually handle the inbound request. Since the number of
+  # inbound requests should be rather low per instance, we keep this at 1
+  @cowboy_acceptors 1
+
   @typedoc """
   Represents an instance
   """
@@ -30,7 +35,14 @@ defmodule FakeStripe.Instance do
     pid: pid
   }
 
+  # state
+  #
+  # Fields:
+  #
+  #   - `:cowboy_ref` - An opaque, unique reference used to stop Cowboy
+  #   - `:port` - The port number which the instance is listening on
   @typep state :: %{
+    cowboy_ref: reference,
     port: :inet.port_number
   }
 
@@ -50,13 +62,17 @@ defmodule FakeStripe.Instance do
       {:ok, pid} ->
         instance = %__MODULE__{pid: pid}
         port = get_port(instance)
+
+        instance = %__MODULE__{ instance | port: port }
+
+        {:ok, instance}
       other ->
         other
     end
   end
 
   @doc false
-  @spec init(Keyword.t) :: {:ok, t}
+  @spec init(Keyword.t) :: {:ok, state}
   def init(opts) do
     # Starting with some stuff directly from the Bypass library
     # though slightly rearranged
@@ -64,17 +80,48 @@ defmodule FakeStripe.Instance do
     # Using `0` as the port number causes the port to be automatically selected
     # by the operating system; see `:gen_tcp.listen/2`
     port = Keyword.get(opts, :port, 0)
+
+    # Establishes a socket connection to the specified port (or if 0, to a
+    # random, available port chosen by the OS)
     case :ranch_tcp.listen(ip: @listen_ip, port: port) do
       {:ok, socket} ->
+        # Gets the actual port for the socket by requesting it from the
+        # `:inet` application
         {:ok, port} = :inet.port(socket)
-        :erlang.port_close(socket)
 
-        ref = make_ref()
-        socket = do_up(port, ref)
+        # this reference value can be used to stop Cowboy later on using
+        # `Plug.Adapters.Cowboy.shutdown/1`
+        cowboy_ref = make_ref()
 
+        # These options establish how Cowboy will run; notably it needs the
+        # reference which we created above which helps keep track of what to
+        # shutdown later. It also needs to know how many acceptors (which accept
+        # inbound requests) to start, the port number to use, and the socket it
+        # can use.
+        #
+        # We won't pass these options to Cowboy directly, though, instead we'll
+        # let Plug do that on our behalf.
+        cowboy_opts = [
+          ref: cowboy_ref,
+          acceptors: @cowboy_acceptors,
+          port: port,
+          socket: socket
+        ]
+
+        plug_opts = [self()]
+
+        # The following function starts the Cowboy listener supervision pool for this instance
+        # and returns the pool's PID. The pool itself is added to the
+        # `:ranch_sup` supervision pool as well.
+        #
+        # But we don't need the PID so we throw it away…
+        {:ok, _pid} = Plug.Adapters.Cowboy.http(FakeStripe.Router, plug_opts, cowboy_opts)
+
+        # Cowboy turns over ownership of the socket to the listener pool, so we
+        # may not actually be needed later
         state = %{
           port: port,
-          ref: ref,
+          cowboy_ref: cowboy_ref,
           socket: socket
         }
 
@@ -92,7 +139,7 @@ defmodule FakeStripe.Instance do
   @doc """
   Retrieves the port number for the instance
   """
-  @spec get_port(instance) :: {:ok, :inet.port_number} | {:error, :timeout | :no_instance}
+  @spec get_port(t) :: {:ok, :inet.port_number} | {:error, :timeout | :no_instance}
   def get_port(instance) do
     GenServer.call(instance.pid, :get_port)
   end
