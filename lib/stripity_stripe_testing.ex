@@ -1,2 +1,0 @@
-defmodule StripityStripeTesting do
-end

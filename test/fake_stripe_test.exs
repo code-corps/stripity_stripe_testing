@@ -1,6 +1,6 @@
-defmodule StripityStripeTestingTest do
+defmodule FakeStripeTest do
   use ExUnit.Case
-  doctest StripityStripeTesting
+  doctest FakeStripe
 
   test "the truth" do
     assert 1 + 1 == 2

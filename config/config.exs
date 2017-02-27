@@ -10,11 +10,11 @@ use Mix.Config
 
 # You can configure for your application as:
 #
-#     config :stripity_stripe_testing, key: :value
+#     config :fake_stripe, key: :value
 #
 # And access this configuration in your application as:
 #
-#     Application.get_env(:stripity_stripe_testing, :key)
+#     Application.get_env(:fake_stripe, :key)
 #
 # Or configure a 3rd-party app:
 #
